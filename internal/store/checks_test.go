@@ -108,3 +108,32 @@ func TestTargetUptime(t *testing.T) {
 		t.Errorf("TargetUptime() = %+v, want 3 checks, 2 successes", got)
 	}
 }
+
+func TestDeleteChecksBefore(t *testing.T) {
+	ctx := context.Background()
+	s := newMigratedStore(t)
+	tg := mustTarget(t, s, "a", 30)
+
+	for _, c := range []Check{
+		{TargetID: tg.ID, CheckedAt: ago(10 * 24 * time.Hour), Success: true},
+		{TargetID: tg.ID, CheckedAt: ago(8 * 24 * time.Hour), Success: true},
+		{TargetID: tg.ID, CheckedAt: ago(1 * time.Hour), Success: true},
+	} {
+		if err := s.RecordCheck(ctx, c); err != nil {
+			t.Fatalf("RecordCheck() error: %v", err)
+		}
+	}
+
+	n, err := s.DeleteChecksBefore(ctx, ago(7*24*time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteChecksBefore() error: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("deleted %d checks, want 2", n)
+	}
+
+	left, err := s.RecentChecks(ctx, tg.ID, 10)
+	if err != nil || len(left) != 1 {
+		t.Errorf("remaining checks = (%v, %v), want exactly the recent one", left, err)
+	}
+}

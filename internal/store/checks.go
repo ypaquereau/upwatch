@@ -95,3 +95,16 @@ func (s *Store) TargetUptime(ctx context.Context, targetID int64, since time.Tim
 	}
 	return u, nil
 }
+
+// DeleteChecksBefore removes the checks recorded before the given time (the
+// retention policy) and returns how many were deleted.
+//
+// The (target_id, checked_at) index cannot serve this filter since target_id
+// leads it, so this scans the table; acceptable for an hourly job at this size.
+func (s *Store) DeleteChecksBefore(ctx context.Context, before time.Time) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM checks WHERE checked_at < $1`, before)
+	if err != nil {
+		return 0, fmt.Errorf("deleting old checks: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
