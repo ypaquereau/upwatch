@@ -48,3 +48,46 @@ func TestCreateTarget(t *testing.T) {
 		}
 	})
 }
+
+func TestGetTarget(t *testing.T) {
+	ctx := context.Background()
+	s := newMigratedStore(t)
+
+	created, err := s.CreateTarget(ctx, "Example", "https://example.com", 30)
+	if err != nil {
+		t.Fatalf("CreateTarget() error: %v", err)
+	}
+
+	got, err := s.GetTarget(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetTarget() error: %v", err)
+	}
+	if got != created {
+		t.Errorf("GetTarget() = %+v, want %+v", got, created)
+	}
+
+	_, err = s.GetTarget(ctx, created.ID+1000)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown id: error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteTarget(t *testing.T) {
+	ctx := context.Background()
+	s := newMigratedStore(t)
+
+	created, err := s.CreateTarget(ctx, "Example", "https://example.com", 30)
+	if err != nil {
+		t.Fatalf("CreateTarget() error: %v", err)
+	}
+
+	if err := s.DeleteTarget(ctx, created.ID); err != nil {
+		t.Fatalf("DeleteTarget() error: %v", err)
+	}
+	if _, err := s.GetTarget(ctx, created.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("after delete: error = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteTarget(ctx, created.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("second delete: error = %v, want ErrNotFound", err)
+	}
+}
