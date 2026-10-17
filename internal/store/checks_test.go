@@ -61,3 +61,50 @@ func TestRecordAndRecentChecks(t *testing.T) {
 		t.Errorf("unknown target: got (%v, %v), want empty non-nil slice and nil error", empty, err)
 	}
 }
+
+func TestUptimePercent(t *testing.T) {
+	tests := []struct {
+		name string
+		u    Uptime
+		want float64
+	}{
+		{"no checks", Uptime{}, 0},
+		{"all failed", Uptime{Checks: 4, Successes: 0}, 0},
+		{"half", Uptime{Checks: 4, Successes: 2}, 50},
+		{"all succeeded", Uptime{Checks: 3, Successes: 3}, 100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.u.Percent(); got != tt.want {
+				t.Errorf("Percent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTargetUptime(t *testing.T) {
+	ctx := context.Background()
+	s := newMigratedStore(t)
+	tg := mustTarget(t, s, "a", 30)
+	other := mustTarget(t, s, "b", 30)
+
+	for _, c := range []Check{
+		{TargetID: tg.ID, CheckedAt: ago(2 * time.Hour), Success: false}, // outside the window
+		{TargetID: tg.ID, CheckedAt: ago(30 * time.Minute), Success: true},
+		{TargetID: tg.ID, CheckedAt: ago(20 * time.Minute), Success: true},
+		{TargetID: tg.ID, CheckedAt: ago(10 * time.Minute), Success: false},
+		{TargetID: other.ID, CheckedAt: ago(10 * time.Minute), Success: false}, // another target
+	} {
+		if err := s.RecordCheck(ctx, c); err != nil {
+			t.Fatalf("RecordCheck() error: %v", err)
+		}
+	}
+
+	got, err := s.TargetUptime(ctx, tg.ID, ago(time.Hour))
+	if err != nil {
+		t.Fatalf("TargetUptime() error: %v", err)
+	}
+	if got != (Uptime{Checks: 3, Successes: 2}) {
+		t.Errorf("TargetUptime() = %+v, want 3 checks, 2 successes", got)
+	}
+}

@@ -63,3 +63,35 @@ func (s *Store) RecentChecks(ctx context.Context, targetID int64, limit int) ([]
 	}
 	return checks, nil
 }
+
+// Uptime summarises the checks of a target over a time window.
+type Uptime struct {
+	Checks    int
+	Successes int
+}
+
+// Percent returns the share of successful checks, from 0 to 100. With no
+// checks there is nothing to measure, so it returns 0; callers that need to
+// tell "no data" from "all failed" should look at Checks.
+func (u Uptime) Percent() float64 {
+	if u.Checks == 0 {
+		return 0
+	}
+	return float64(u.Successes) / float64(u.Checks) * 100
+}
+
+// TargetUptime counts the checks of a target recorded at or after since.
+// The target is not required to exist: an unknown ID simply has no checks.
+func (s *Store) TargetUptime(ctx context.Context, targetID int64, since time.Time) (Uptime, error) {
+	var u Uptime
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*), count(*) FILTER (WHERE success)
+		 FROM checks
+		 WHERE target_id = $1 AND checked_at >= $2`,
+		targetID, since,
+	).Scan(&u.Checks, &u.Successes)
+	if err != nil {
+		return Uptime{}, fmt.Errorf("computing uptime for target %d: %w", targetID, err)
+	}
+	return u, nil
+}
