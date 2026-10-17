@@ -80,3 +80,63 @@ func (s *Store) DeleteTarget(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+// TargetStatus is a target together with its most recent check, if any.
+type TargetStatus struct {
+	Target
+	LastCheck *Check
+}
+
+// ListTargets returns every target ordered by ID, each with its latest check
+// (nil when it has never been checked).
+//
+// The LATERAL subquery picks the newest check per target and is served by the
+// (target_id, checked_at DESC) index; LEFT JOIN keeps targets with no checks.
+func (s *Store) ListTargets(ctx context.Context) ([]TargetStatus, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.id, t.name, t.url, t.interval_s, t.created_at,
+		       c.id, c.checked_at, c.status_code, c.latency_ms, c.success, c.error
+		FROM targets t
+		LEFT JOIN LATERAL (
+			SELECT id, checked_at, status_code, latency_ms, success, error
+			FROM checks
+			WHERE target_id = t.id
+			ORDER BY checked_at DESC
+			LIMIT 1
+		) c ON true
+		ORDER BY t.id`)
+	if err != nil {
+		return nil, fmt.Errorf("listing targets: %w", err)
+	}
+	defer rows.Close()
+
+	statuses := []TargetStatus{}
+	for rows.Next() {
+		var (
+			ts        TargetStatus
+			checkID   *int64
+			checkedAt *time.Time
+			code      *int
+			latency   *int
+			success   *bool
+			errMsg    *string
+		)
+		if err := rows.Scan(
+			&ts.ID, &ts.Name, &ts.URL, &ts.IntervalS, &ts.CreatedAt,
+			&checkID, &checkedAt, &code, &latency, &success, &errMsg,
+		); err != nil {
+			return nil, fmt.Errorf("scanning target: %w", err)
+		}
+		if checkID != nil { // the LEFT JOIN found a check
+			ts.LastCheck = &Check{
+				ID: *checkID, TargetID: ts.ID, CheckedAt: *checkedAt,
+				StatusCode: code, LatencyMS: latency, Success: *success, Error: errMsg,
+			}
+		}
+		statuses = append(statuses, ts)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating targets: %w", err)
+	}
+	return statuses, nil
+}

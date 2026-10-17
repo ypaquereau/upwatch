@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // newMigratedStore returns a store with an empty, up-to-date schema.
@@ -89,5 +90,40 @@ func TestDeleteTarget(t *testing.T) {
 	}
 	if err := s.DeleteTarget(ctx, created.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("second delete: error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestListTargets(t *testing.T) {
+	ctx := context.Background()
+	s := newMigratedStore(t)
+
+	empty, err := s.ListTargets(ctx)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("no targets: got (%v, %v), want empty non-nil slice and nil error", empty, err)
+	}
+
+	a := mustTarget(t, s, "a", 30)
+	b := mustTarget(t, s, "b", 30)
+	for _, c := range []Check{
+		{TargetID: a.ID, CheckedAt: ago(2 * time.Minute), StatusCode: intPtr(500), LatencyMS: intPtr(9), Success: false},
+		{TargetID: a.ID, CheckedAt: ago(1 * time.Minute), StatusCode: intPtr(200), LatencyMS: intPtr(7), Success: true},
+	} {
+		if err := s.RecordCheck(ctx, c); err != nil {
+			t.Fatalf("RecordCheck() error: %v", err)
+		}
+	}
+
+	got, err := s.ListTargets(ctx)
+	if err != nil {
+		t.Fatalf("ListTargets() error: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != a.ID || got[1].ID != b.ID {
+		t.Fatalf("unexpected targets: %+v", got)
+	}
+	if got[0].LastCheck == nil || !got[0].LastCheck.Success || *got[0].LastCheck.LatencyMS != 7 {
+		t.Errorf("a.LastCheck = %+v, want the newest (successful) check", got[0].LastCheck)
+	}
+	if got[1].LastCheck != nil {
+		t.Errorf("b.LastCheck = %+v, want nil (never checked)", got[1].LastCheck)
 	}
 }
