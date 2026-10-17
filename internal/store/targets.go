@@ -140,3 +140,40 @@ func (s *Store) ListTargets(ctx context.Context) ([]TargetStatus, error) {
 	}
 	return statuses, nil
 }
+
+// DueTargets returns the targets that must be checked now: those never
+// checked, or whose latest check is at least interval_s seconds old.
+// The worker polls this every second, so it relies on the same
+// (target_id, checked_at DESC) index as ListTargets.
+func (s *Store) DueTargets(ctx context.Context) ([]Target, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.id, t.name, t.url, t.interval_s, t.created_at
+		FROM targets t
+		LEFT JOIN LATERAL (
+			SELECT checked_at
+			FROM checks
+			WHERE target_id = t.id
+			ORDER BY checked_at DESC
+			LIMIT 1
+		) c ON true
+		WHERE c.checked_at IS NULL
+		   OR c.checked_at <= now() - t.interval_s * interval '1 second'
+		ORDER BY t.id`)
+	if err != nil {
+		return nil, fmt.Errorf("listing due targets: %w", err)
+	}
+	defer rows.Close()
+
+	targets := []Target{}
+	for rows.Next() {
+		var t Target
+		if err := rows.Scan(&t.ID, &t.Name, &t.URL, &t.IntervalS, &t.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning due target: %w", err)
+		}
+		targets = append(targets, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating due targets: %w", err)
+	}
+	return targets, nil
+}

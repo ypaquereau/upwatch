@@ -127,3 +127,28 @@ func TestListTargets(t *testing.T) {
 		t.Errorf("b.LastCheck = %+v, want nil (never checked)", got[1].LastCheck)
 	}
 }
+
+func TestDueTargets(t *testing.T) {
+	ctx := context.Background()
+	s := newMigratedStore(t)
+
+	never := mustTarget(t, s, "never", 30)
+	stale := mustTarget(t, s, "stale", 30)
+	fresh := mustTarget(t, s, "fresh", 30)
+	for _, c := range []Check{
+		{TargetID: stale.ID, CheckedAt: ago(60 * time.Second), Success: true},
+		{TargetID: fresh.ID, CheckedAt: ago(5 * time.Second), Success: true},
+	} {
+		if err := s.RecordCheck(ctx, c); err != nil {
+			t.Fatalf("RecordCheck() error: %v", err)
+		}
+	}
+
+	got, err := s.DueTargets(ctx)
+	if err != nil {
+		t.Fatalf("DueTargets() error: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != never.ID || got[1].ID != stale.ID {
+		t.Errorf("DueTargets() = %+v, want [never, stale] (fresh was checked 5s ago)", got)
+	}
+}
