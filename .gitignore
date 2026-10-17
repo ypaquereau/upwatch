@@ -1,0 +1,21 @@
+# Go
+/bin/
+*.test
+*.out
+coverage.*
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!example.tfvars
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local env
+.env
